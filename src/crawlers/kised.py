@@ -1,4 +1,12 @@
-"""창업진흥원 (kised.or.kr) 사업공고 크롤러."""
+"""창업진흥원 (kised.or.kr) 사업공고 크롤러.
+
+실제 HTML 구조:
+- URL: /menu.es?mid=a10302000000 (사업공고)
+- ul.lstyle_list > li 형태
+- 각 li: a > b.ls_tit (제목), href가 k-startup.go.kr 상세 링크
+- dl.clearfix 안에 기관명, 마감일자 정보
+- span.state 안에 진행 상태 (진행중/마감 등)
+"""
 
 from __future__ import annotations
 
@@ -13,8 +21,7 @@ from .base import Article, BaseCrawler
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.kised.or.kr"
-# 사업공고 게시판
-LIST_URL = f"{BASE_URL}/menu.es?mid=a10305010000"
+LIST_URL = f"{BASE_URL}/menu.es?mid=a10302000000"
 
 
 class KisedCrawler(BaseCrawler):
@@ -31,74 +38,56 @@ class KisedCrawler(BaseCrawler):
         soup = BeautifulSoup(resp.text, "html.parser")
         articles: list[Article] = []
 
-        rows = self._find_rows(soup)
-        for row in rows:
-            article = self._parse_row(row)
+        # ul.lstyle_list > li
+        items = soup.select("ul.lstyle_list > li")
+        if not items:
+            logger.warning("[%s] ul.lstyle_list를 찾을 수 없습니다.", self.name)
+            return []
+
+        for item in items:
+            article = self._parse_item(item)
             if article:
                 articles.append(article)
 
         logger.info("[%s] %d건 수집 완료", self.name, len(articles))
         return articles
 
-    def _find_rows(self, soup: BeautifulSoup) -> list:
-        selectors = [
-            "table.boardList tbody tr",
-            "table.bbs_list tbody tr",
-            "div.board_list table tbody tr",
-            "table.tbl_type tbody tr",
-            "div.bbs_list_wrap table tbody tr",
-            "table tbody tr",
-        ]
-        for sel in selectors:
-            rows = soup.select(sel)
-            if rows:
-                return rows
-        return []
-
-    def _parse_row(self, row) -> Article | None:
-        cols = row.select("td")
-        if len(cols) < 2:
+    def _parse_item(self, item) -> Article | None:
+        """li 요소에서 공고 정보를 추출."""
+        # 제목: b.ls_tit
+        tit_el = item.select_one("b.ls_tit")
+        if not tit_el:
             return None
-
-        link = row.select_one("a")
-        if not link:
-            return None
-
-        title = link.get_text(strip=True)
+        title = tit_el.get_text(strip=True)
         if not title:
             return None
 
-        url = self._extract_url(link)
-        date = self._extract_date(row)
+        # URL: a 태그의 href (k-startup.go.kr 상세 링크)
+        link = item.select_one("a[href]")
+        url = LIST_URL
+        if link:
+            href = link.get("href", "")
+            if href and href.startswith("http"):
+                url = href
+            elif href and href.startswith("/"):
+                url = BASE_URL + href
+
+        # 마감일자: dl > dd 에서 날짜 추출
+        date = self._extract_date(item)
 
         return Article(title=title, url=url, source=self.name, date=date)
 
-    def _extract_url(self, link) -> str:
-        href = link.get("href", "")
-        if href and href.startswith("http"):
-            return href
-        if href and href.startswith("/"):
-            return BASE_URL + href
-
-        onclick = link.get("onclick", "")
-        if onclick:
-            match = re.search(r"'(/[^']+)'", onclick)
+    def _extract_date(self, item) -> str:
+        """마감일자를 추출. 없으면 오늘 날짜."""
+        dds = item.select("dl dd")
+        for dd in dds:
+            text = dd.get_text(strip=True)
+            match = re.match(r"(\d{4}-\d{2}-\d{2})", text)
             if match:
-                return BASE_URL + match.group(1)
-            match = re.search(r"(\d{4,})", onclick)
-            if match:
-                return f"{BASE_URL}/board.es?mid=a10305010000&bid=0005&act=view&otp_id={match.group(1)}"
-
-        return LIST_URL
-
-    def _extract_date(self, element) -> str:
-        text = element.get_text()
-        match = re.search(r"(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})", text)
+                return match.group(1)
+        # 폴백
+        text = item.get_text()
+        match = re.search(r"(\d{4})-(\d{2})-(\d{2})", text)
         if match:
-            y, m, d = match.groups()
-            try:
-                dt = datetime(int(y), int(m), int(d))
-                return dt.strftime("%Y-%m-%d")
-            except ValueError:
-                pass
+            return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
         return datetime.now().strftime("%Y-%m-%d")
