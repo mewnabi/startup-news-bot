@@ -124,7 +124,12 @@ def _send_via_bot(categorized: dict[str, list[Article]]) -> bool:
         logger.info("Slack 전송 성공! (메인 + 스레드)")
         return True
     except SlackApiError as e:
-        logger.error("Slack API 오류: %s", e.response["error"])
+        logger.error("Slack API 오류: %s (needed: %s)", e.response["error"], e.response.get("needed", "unknown"))
+        logger.error("Slack API 응답: %s", e.response.data)
+        # Bot Token 실패 시 Webhook 폴백
+        if SLACK_WEBHOOK_URL:
+            logger.info("Webhook으로 폴백합니다.")
+            return _send_via_webhook(categorized)
         return False
 
 
