@@ -4,50 +4,75 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from src.crawlers.base import Article
-from src.processor import classify, process
+from src.processor import CAT_NEWS, CAT_NEW, CAT_URGENT, classify, process
 
 
-def _make_article(title: str = "테스트", days_ago: int = 1, url: str = "") -> Article:
+def _make_article(
+    title: str = "테스트",
+    days_ago: int = 1,
+    url: str = "",
+    source: str = "K-Startup",
+    deadline_days: int | None = None,
+) -> Article:
     date = (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+    deadline = ""
+    if deadline_days is not None:
+        deadline = (datetime.now() + timedelta(days=deadline_days)).strftime("%Y-%m-%d")
     return Article(
         title=title,
         url=url or f"https://example.com/{title}/{days_ago}",
-        source="테스트",
+        source=source,
         date=date,
+        deadline=deadline,
     )
 
 
 class TestClassify:
-    def test_support_program(self):
-        a = _make_article("2026년 예비창업패키지 모집 공고")
-        assert "지원사업" in classify(a)
+    def test_urgent_within_7_days(self):
+        a = _make_article("마감 임박 공고", deadline_days=3)
+        assert classify(a) == CAT_URGENT
 
-    def test_investment(self):
-        a = _make_article("스타트업 투자 펀드 조성")
-        assert "투자" in classify(a)
+    def test_not_urgent_beyond_7_days(self):
+        a = _make_article("여유 있는 공고", deadline_days=30)
+        assert classify(a) == CAT_NEW
 
-    def test_education(self):
-        a = _make_article("창업 멘토링 프로그램 개최")
-        assert "교육" in classify(a)
+    def test_news_source(self):
+        a = _make_article("정책 뉴스", source="네이버뉴스")
+        assert classify(a) == CAT_NEWS
 
-    def test_default_news(self):
-        a = _make_article("중기부 장관 간담회")
-        assert "정책 뉴스" in classify(a)
+    def test_mss_is_news(self):
+        a = _make_article("중기부 보도자료", source="중소벤처기업부")
+        assert classify(a) == CAT_NEWS
+
+    def test_no_deadline_is_new(self):
+        a = _make_article("일반 공고", source="기업마당")
+        assert classify(a) == CAT_NEW
 
 
 class TestProcess:
     @patch("src.processor.load_history", return_value=set())
     @patch("src.processor.save_history")
-    def test_filters_old_articles(self, mock_save, mock_load):
+    def test_filters_old_news(self, mock_save, mock_load):
         articles = [
-            _make_article("최신 기사", days_ago=1),
-            _make_article("오래된 기사", days_ago=30),
+            _make_article("최신 뉴스", days_ago=1, source="네이버뉴스"),
+            _make_article("오래된 뉴스", days_ago=30, source="네이버뉴스"),
         ]
         result = process(articles)
-        all_articles = [a for cat in result.values() for a in cat]
-        titles = [a.title for a in all_articles]
-        assert "최신 기사" in titles
-        assert "오래된 기사" not in titles
+        all_titles = [a.title for cat in result.values() for a in cat]
+        assert "최신 뉴스" in all_titles
+        assert "오래된 뉴스" not in all_titles
+
+    @patch("src.processor.load_history", return_value=set())
+    @patch("src.processor.save_history")
+    def test_excludes_expired_deadlines(self, mock_save, mock_load):
+        articles = [
+            _make_article("마감된 공고", deadline_days=-3),
+            _make_article("진행중 공고", deadline_days=10),
+        ]
+        result = process(articles)
+        all_titles = [a.title for cat in result.values() for a in cat]
+        assert "마감된 공고" not in all_titles
+        assert "진행중 공고" in all_titles
 
     @patch("src.processor.load_history", return_value={"https://example.com/old"})
     @patch("src.processor.save_history")
@@ -57,21 +82,22 @@ class TestProcess:
             _make_article("신규 기사", url="https://example.com/new"),
         ]
         result = process(articles)
-        all_articles = [a for cat in result.values() for a in cat]
-        titles = [a.title for a in all_articles]
-        assert "중복 기사" not in titles
-        assert "신규 기사" in titles
+        all_titles = [a.title for cat in result.values() for a in cat]
+        assert "중복 기사" not in all_titles
+        assert "신규 기사" in all_titles
 
     @patch("src.processor.load_history", return_value=set())
     @patch("src.processor.save_history")
-    def test_categorizes_articles(self, mock_save, mock_load):
+    def test_categorizes_correctly(self, mock_save, mock_load):
         articles = [
-            _make_article("창업패키지 모집 공고"),
-            _make_article("스타트업 투자 확대"),
+            _make_article("마감 임박", deadline_days=3, source="K-Startup"),
+            _make_article("일반 공고", deadline_days=30, source="기업마당"),
+            _make_article("정책 뉴스", source="네이버뉴스"),
         ]
         result = process(articles)
-        categories = list(result.keys())
-        assert len(categories) == 2
+        assert CAT_URGENT in result
+        assert CAT_NEW in result
+        assert CAT_NEWS in result
 
     @patch("src.processor.load_history", return_value=set())
     @patch("src.processor.save_history")

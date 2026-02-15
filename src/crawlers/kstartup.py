@@ -72,23 +72,25 @@ class KStartupCrawler(BaseCrawler):
                 pbanc_sn = match.group(1)
                 url = f"{LIST_URL}?schM=view&pbancSn={pbanc_sn}"
 
-        # 날짜: .bottom > span.list 에서 "등록일자 YYYY-MM-DD" 추출
-        date = self._extract_date(item)
+        # 날짜: .bottom > span.list 에서 등록일자/마감일자 추출
+        date, deadline = self._extract_dates(item)
 
-        return Article(title=title, url=url, source=self.name, date=date)
+        return Article(title=title, url=url, source=self.name, date=date, deadline=deadline)
 
-    def _extract_date(self, item) -> str:
-        """등록일자를 추출."""
+    def _extract_dates(self, item) -> tuple[str, str]:
+        """등록일자와 마감일자를 추출."""
+        date = ""
+        deadline = ""
         spans = item.select("div.bottom span.list")
         for span in spans:
             text = span.get_text(strip=True)
+            match = re.search(r"(\d{4}-\d{2}-\d{2})", text)
+            if not match:
+                continue
             if "등록일자" in text:
-                match = re.search(r"(\d{4}-\d{2}-\d{2})", text)
-                if match:
-                    return match.group(1)
-        # 폴백: 아무 날짜나 찾기
-        text = item.get_text()
-        match = re.search(r"(\d{4})[.\-](\d{2})[.\-](\d{2})", text)
-        if match:
-            return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
-        return datetime.now().strftime("%Y-%m-%d")
+                date = match.group(1)
+            elif "마감일자" in text:
+                deadline = match.group(1)
+        if not date:
+            date = datetime.now().strftime("%Y-%m-%d")
+        return date, deadline

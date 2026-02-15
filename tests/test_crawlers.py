@@ -11,7 +11,6 @@ class TestStripHtml:
         assert _strip_html("<b>테스트</b>") == "테스트"
 
     def test_unescapes_entities(self):
-        # &lt;b&gt; → <b> → strip_html이 태그 제거 → 빈 문자열
         assert _strip_html("&amp;") == "&"
         assert _strip_html("&lt;hello&gt;") == ""
 
@@ -109,3 +108,13 @@ class TestArticle:
         d = a.to_dict()
         assert d["title"] == "t"
         assert d["category"] == "c"
+
+    def test_d_day(self):
+        from datetime import datetime, timedelta
+        future = (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%d")
+        a = Article(title="t", url="u", source="s", date="2026-01-01", deadline=future)
+        assert a.d_day == 5
+
+    def test_d_day_none_without_deadline(self):
+        a = Article(title="t", url="u", source="s", date="2026-01-01")
+        assert a.d_day is None

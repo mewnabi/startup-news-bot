@@ -73,21 +73,24 @@ class KisedCrawler(BaseCrawler):
                 url = BASE_URL + href
 
         # 마감일자: dl > dd 에서 날짜 추출
-        date = self._extract_date(item)
+        deadline = self._extract_deadline(item)
+        date = datetime.now().strftime("%Y-%m-%d")
 
-        return Article(title=title, url=url, source=self.name, date=date)
+        return Article(title=title, url=url, source=self.name, date=date, deadline=deadline)
 
-    def _extract_date(self, item) -> str:
-        """마감일자를 추출. 없으면 오늘 날짜."""
+    def _extract_deadline(self, item) -> str:
+        """마감일자를 추출."""
+        # dt/dd 쌍에서 마감일자 찾기
+        dts = item.select("dl dt")
         dds = item.select("dl dd")
+        for dt, dd in zip(dts, dds):
+            if "마감" in dt.get_text():
+                match = re.match(r"(\d{4}-\d{2}-\d{2})", dd.get_text(strip=True))
+                if match:
+                    return match.group(1)
+        # 폴백: 아무 날짜나
         for dd in dds:
-            text = dd.get_text(strip=True)
-            match = re.match(r"(\d{4}-\d{2}-\d{2})", text)
+            match = re.match(r"(\d{4}-\d{2}-\d{2})", dd.get_text(strip=True))
             if match:
                 return match.group(1)
-        # 폴백
-        text = item.get_text()
-        match = re.search(r"(\d{4})-(\d{2})-(\d{2})", text)
-        if match:
-            return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
-        return datetime.now().strftime("%Y-%m-%d")
+        return ""

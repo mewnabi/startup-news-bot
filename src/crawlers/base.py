@@ -22,8 +22,9 @@ class Article:
     title: str
     url: str
     source: str
-    date: str  # YYYY-MM-DD
+    date: str  # YYYY-MM-DD (등록일/발행일)
     category: str = ""  # 자동 분류됨
+    deadline: str = ""  # YYYY-MM-DD (마감일, 공고만 해당)
     extra: dict = field(default_factory=dict)
 
     @property
@@ -33,12 +34,30 @@ class Article:
         except ValueError:
             return None
 
+    @property
+    def deadline_obj(self) -> datetime | None:
+        if not self.deadline:
+            return None
+        try:
+            return datetime.strptime(self.deadline, "%Y-%m-%d")
+        except ValueError:
+            return None
+
+    @property
+    def d_day(self) -> int | None:
+        """마감일까지 남은 일수. 음수면 마감됨."""
+        dl = self.deadline_obj
+        if dl is None:
+            return None
+        return (dl - datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)).days
+
     def to_dict(self) -> dict:
         return {
             "title": self.title,
             "url": self.url,
             "source": self.source,
             "date": self.date,
+            "deadline": self.deadline,
             "category": self.category,
         }
 

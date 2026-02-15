@@ -1,4 +1,4 @@
-"""수집된 기사 처리: 중복 제거, 날짜 필터링, 카테고리 분류."""
+"""수집된 기사 처리: 중복 제거, 날짜 필터링, 행동 기반 카테고리 분류."""
 
 from __future__ import annotations
 
@@ -12,29 +12,37 @@ from src.crawlers.base import Article
 
 logger = logging.getLogger(__name__)
 
-# 카테고리 분류 키워드 매핑
-CATEGORY_KEYWORDS: dict[str, list[str]] = {
-    "📋 지원사업 공고": [
-        "공고", "모집", "신청", "접수", "패키지", "바우처", "사업공고",
-        "지원사업", "참여기업", "선정",
-    ],
-    "💰 투자/자금 지원": [
-        "투자", "펀드", "자금", "대출", "보증", "융자", "출자",
-    ],
-    "🎓 교육/멘토링": [
-        "교육", "멘토링", "컨설팅", "아카데미", "특강", "워크숍", "세미나",
-    ],
-    "📰 정책 뉴스": [],  # 기본 카테고리 (매칭 안 되면 여기로)
+# 뉴스 소스 (마감일 없는 정보성 콘텐츠)
+NEWS_SOURCES = {"네이버뉴스", "중소벤처기업부"}
+
+# 카테고리 정의
+CAT_URGENT = "🔥 마감 임박"
+CAT_NEW = "📋 신규 공고"
+CAT_NEWS = "📰 정책 동향"
+
+# 메인 메시지 표시 제한
+LIMITS = {
+    CAT_URGENT: None,  # 전체 표시
+    CAT_NEW: 10,
+    CAT_NEWS: 5,
 }
+
+URGENT_DAYS = 7  # D-7 이내면 마감 임박
 
 
 def classify(article: Article) -> str:
-    """기사 제목 기반으로 카테고리 분류."""
-    title = article.title
-    for category, keywords in CATEGORY_KEYWORDS.items():
-        if any(kw in title for kw in keywords):
-            return category
-    return "📰 정책 뉴스"
+    """기사를 행동 기반 카테고리로 분류."""
+    # 뉴스 소스 → 정책 동향
+    if article.source in NEWS_SOURCES:
+        return CAT_NEWS
+
+    # 마감일이 있고 D-7 이내 → 마감 임박
+    d_day = article.d_day
+    if d_day is not None and 0 <= d_day <= URGENT_DAYS:
+        return CAT_URGENT
+
+    # 나머지 공고 → 신규 공고
+    return CAT_NEW
 
 
 def load_history() -> set[str]:
@@ -57,22 +65,22 @@ def save_history(urls: set[str]) -> None:
 
 
 def process(articles: list[Article]) -> dict[str, list[Article]]:
-    """기사 목록을 처리하여 카테고리별로 분류된 딕셔너리 반환.
-
-    1. 날짜 필터링 (최근 N일)
-    2. 중복 제거 (이전 전송 이력 기반)
-    3. 카테고리 분류
-    4. 전송 이력 업데이트
-    """
+    """기사 목록을 처리하여 카테고리별로 분류된 딕셔너리 반환."""
     cutoff = datetime.now() - timedelta(days=DAYS_LOOKBACK)
     history = load_history()
     result: dict[str, list[Article]] = {}
     new_urls: set[str] = set()
 
     for article in articles:
-        # 날짜 필터링
-        dt = article.date_obj
-        if dt and dt < cutoff:
+        # 날짜 필터링 (뉴스만 — 공고는 마감 전이면 표시)
+        if article.source in NEWS_SOURCES:
+            dt = article.date_obj
+            if dt and dt < cutoff:
+                continue
+
+        # 마감된 공고 제외
+        d_day = article.d_day
+        if d_day is not None and d_day < 0:
             continue
 
         # 중복 제거
@@ -84,9 +92,17 @@ def process(articles: list[Article]) -> dict[str, list[Article]]:
         result.setdefault(article.category, []).append(article)
         new_urls.add(article.url)
 
-    # 각 카테고리 내에서 날짜 역순 정렬
-    for cat in result:
-        result[cat].sort(key=lambda a: a.date, reverse=True)
+    # 마감 임박: D-day 오름차순 (급한 것 먼저)
+    if CAT_URGENT in result:
+        result[CAT_URGENT].sort(key=lambda a: a.d_day if a.d_day is not None else 999)
+
+    # 신규 공고: 등록일 역순
+    if CAT_NEW in result:
+        result[CAT_NEW].sort(key=lambda a: a.date, reverse=True)
+
+    # 정책 동향: 발행일 역순
+    if CAT_NEWS in result:
+        result[CAT_NEWS].sort(key=lambda a: a.date, reverse=True)
 
     # 전송 이력 업데이트
     if new_urls:

@@ -5,6 +5,8 @@ load_dotenv()
 
 # Slack
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
+SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "")
+SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID", "")
 
 # 네이버 검색 API
 NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID", "")
