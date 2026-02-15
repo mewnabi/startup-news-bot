@@ -101,6 +101,12 @@ def _send_via_bot(categorized: dict[str, list[Article]]) -> bool:
     client = WebClient(token=SLACK_BOT_TOKEN)
 
     try:
+        # 봇이 채널에 참여하지 않은 경우 자동 참여 시도
+        try:
+            client.conversations_join(channel=SLACK_CHANNEL_ID)
+        except SlackApiError:
+            pass  # 이미 참여중이거나 권한 없으면 무시
+
         # 메인 메시지
         main_text = _build_main_message(categorized)
         result = client.chat_postMessage(
