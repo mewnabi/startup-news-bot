@@ -1,0 +1,47 @@
+name: Weekly Startup Policy Digest
+
+on:
+  schedule:
+    # UTC 00:00 월요일 = KST 09:00 월요일
+    - cron: '0 0 * * 1'
+  workflow_dispatch: # 수동 실행 가능
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download previous history
+        uses: actions/download-artifact@v4
+        with:
+          name: sent-history
+          path: data/
+        continue-on-error: true  # 첫 실행 시 아티팩트 없음
+
+      - name: Run digest
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+        run: python -m src.main
+
+      - name: Upload history
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sent-history
+          path: data/sent_history.json
+          retention-days: 90
+          overwrite: true
